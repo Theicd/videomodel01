@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Depth Estimation</title>
-    <script src="https://unpkg.com/@tensorflow-models/depth-estimation"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script type="module">
+        import * as depthEstimation from "https://cdn.jsdelivr.net/npm/@tensorflow-models/depth-estimation";
+        import * as tf from "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs";
+        import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js";
+    </script>
     <style>
         body { margin: 0; overflow: hidden; background-color: black; }
         canvas { display: block; }
@@ -25,26 +27,22 @@
     <div id="upload-container">
         <input type="file" id="imageUpload" accept="image/*">
     </div>
-    <script>
-        document.getElementById("imageUpload").addEventListener("change", function (event) {
+    <script type="module">
+        document.getElementById("imageUpload").addEventListener("change", async function (event) {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = function (e) {
-                processImage(e.target.result);
+            reader.onload = async function (e) {
+                const image = new Image();
+                image.src = e.target.result;
+                image.onload = async () => {
+                    const model = await depthEstimation.createDepthEstimator(depthEstimation.SupportedModels.ARPortraitDepth);
+                    const depthMap = await model.estimateDepth(image);
+                    visualizeDepth(e.target.result, depthMap);
+                };
             };
             reader.readAsDataURL(file);
         });
-
-        async function processImage(imageSrc) {
-            const img = new Image();
-            img.src = imageSrc;
-            img.onload = async () => {
-                const model = await depthEstimation.load();
-                const depthMap = await model.predict(img);
-                visualizeDepth(imageSrc, depthMap);
-            };
-        }
 
         function visualizeDepth(imageSrc, depthMap) {
             const scene = new THREE.Scene();
