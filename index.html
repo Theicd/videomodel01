@@ -2,87 +2,177 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Depth Estimation</title>
-    <script type="module">
-        import * as depthEstimation from "https://cdn.jsdelivr.net/npm/@tensorflow-models/depth-estimation";
-        import * as tf from "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs";
-        import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js";
-    </script>
+    <title>Video Depth Generator</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: black; }
-        canvas { display: block; }
-        #upload-container {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 10;
-            background: rgba(255, 255, 255, 0.8);
-            padding: 10px;
-            border-radius: 5px;
+        body {
+            font-family: Arial, sans-serif;
+            background: #0d0d0d;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
         }
+        .video-interface {
+            background: #1f1f1f;
+            border-radius: 15px;
+            padding: 20px;
+            width: 600px;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.2);
+        }
+        .title {
+            text-align: center;
+            color: #00ffcc;
+            margin-bottom: 20px;
+            font-size: 24px;
+            text-transform: uppercase;
+        }
+        .drop-zone {
+            width: 100%;
+            height: 150px;
+            border: 2px dashed #00ffcc;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #2a2a2a;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .drop-zone.dragover { border-color: #ff007a; background: #3a3a3a; }
+        .drop-zone span { color: #ccc; font-size: 16px; }
+        .drop-zone input { position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+        .canvas-container {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        canvas {
+            width: 48%;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #333;
+        }
+        .controls {
+            text-align: center;
+        }
+        #downloadBtn {
+            padding: 10px 30px;
+            background: #00ffcc;
+            border: none;
+            border-radius: 25px;
+            color: #1a1a1a;
+            font-weight: bold;
+            cursor: pointer;
+            display: none;
+            transition: background 0.3s;
+        }
+        #downloadBtn:hover { background: #00ff99; }
     </style>
 </head>
 <body>
-    <div id="upload-container">
-        <input type="file" id="imageUpload" accept="image/*">
+    <div class="video-interface">
+        <div class="title">Video Depth Generator</div>
+        <div class="drop-zone" id="dropZone">
+            <span>Drag Image Here or Click to Select</span>
+            <input type="file" id="imageInput" accept="image/*">
+        </div>
+        <div class="canvas-container">
+            <canvas id="inputCanvas"></canvas>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+        <div class="controls">
+            <button id="downloadBtn">Download Depth Map</button>
+        </div>
     </div>
-    <script type="module">
-        document.getElementById("imageUpload").addEventListener("change", async function (event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = async function (e) {
-                const image = new Image();
-                image.src = e.target.result;
-                image.onload = async () => {
-                    const model = await depthEstimation.createDepthEstimator(depthEstimation.SupportedModels.ARPortraitDepth);
-                    const depthMap = await model.estimateDepth(image);
-                    visualizeDepth(e.target.result, depthMap);
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script>
+        async function runDepthEstimation() {
+            const dropZone = document.getElementById('dropZone');
+            const input = document.getElementById('imageInput');
+            const inputCanvas = document.getElementById('inputCanvas');
+            const outputCanvas = document.getElementById('outputCanvas');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const inputCtx = inputCanvas.getContext('2d');
+            const outputCtx = outputCanvas.getContext('2d');
+
+            // טעינת המודל של MiDaS ישירות מ-GitHub
+            const modelUrl = 'https://raw.githubusercontent.com/timmh/monocular_depth_estimation_demo/main/model/midas_small_tfjs/model.json';
+            const model = await tf.loadGraphModel(modelUrl);
+            console.log('Model loaded successfully');
+
+            // פונקציה לעיבוד תמונה
+            async function processImage(file) {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.crossOrigin = "anonymous"; // חשוב לטעינה מ-GitHub
+                img.onload = async () => {
+                    inputCanvas.width = img.width;
+                    inputCanvas.height = img.height;
+                    outputCanvas.width = img.width;
+                    outputCanvas.height = img.height;
+                    inputCtx.drawImage(img, 0, 0);
+
+                    // הכנת התמונה למודל
+                    const tensor = tf.browser.fromPixels(img)
+                        .resizeBilinear([256, 256]) // MiDaS דורש גודל קבוע
+                        .toFloat()
+                        .div(255.0)
+                        .expandDims(0);
+
+                    // חישוב עומק
+                    const prediction = await model.predict(tensor);
+                    const depthMap = prediction.squeeze().arraySync();
+                    const imageData = outputCtx.createImageData(img.width, img.height);
+
+                    // נרמול התוצאה והצגה
+                    const min = Math.min(...depthMap.flat());
+                    const max = Math.max(...depthMap.flat());
+                    for (let y = 0; y < img.height; y++) {
+                        for (let x = 0; x < img.width; x++) {
+                            const i = (y * img.width + x);
+                            const scaledX = Math.floor((x / img.width) * 256);
+                            const scaledY = Math.floor((y / img.height) * 256);
+                            const depthValue = depthMap[scaledY][scaledX];
+                            const normalized = ((depthValue - min) / (max - min)) * 255;
+                            const value = Math.min(Math.max(normalized, 0), 255);
+                            imageData.data[i * 4] = value;
+                            imageData.data[i * 4 + 1] = value;
+                            imageData.data[i * 4 + 2] = value;
+                            imageData.data[i * 4 + 3] = 255;
+                        }
+                    }
+                    outputCtx.putImageData(imageData, 0, 0);
+                    downloadBtn.style.display = 'block';
                 };
+            }
+
+            // אירועי גרירה ובחירה
+            dropZone.onclick = () => input.click();
+            input.onchange = () => processImage(input.files[0]);
+            dropZone.ondrop = (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                processImage(e.dataTransfer.files[0]);
             };
-            reader.readAsDataURL(file);
-        });
+            dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+            dropZone.ondragleave = () => dropZone.classList.remove('dragover');
 
-        function visualizeDepth(imageSrc, depthMap) {
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
-
-            const light = new THREE.PointLight(0xffffff, 1.5, 100);
-            light.position.set(0, 0, 10);
-            scene.add(light);
-
-            const textureLoader = new THREE.TextureLoader();
-            textureLoader.load(imageSrc, function (texture) {
-                const geometry = new THREE.PlaneGeometry(10, 10, 100, 100);
-                const material = new THREE.MeshStandardMaterial({
-                    map: texture,
-                    displacementMap: new THREE.DataTexture(depthMap.dataSync(), depthMap.shape[1], depthMap.shape[0], THREE.LuminanceFormat, THREE.FloatType),
-                    displacementScale: 2.5,
-                    side: THREE.DoubleSide
-                });
-                const mesh = new THREE.Mesh(geometry, material);
-                scene.add(mesh);
-                camera.position.z = 10;
-
-                function animate() {
-                    requestAnimationFrame(animate);
-                    camera.position.z = 10 + Math.sin(Date.now() * 0.001) * 1.5;
-                    camera.lookAt(mesh.position);
-                    renderer.render(scene, camera);
-                }
-                animate();
-            });
-
-            window.addEventListener("resize", function () {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-            });
+            // הורדת התוצאה
+            downloadBtn.onclick = () => {
+                const link = document.createElement('a');
+                link.download = 'depth_map.png';
+                link.href = outputCanvas.toDataURL('image/png');
+                link.click();
+            };
         }
+
+        runDepthEstimation();
     </script>
 </body>
 </html>
