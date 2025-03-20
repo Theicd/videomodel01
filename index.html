@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Depth Effect</title>
+    <title>3D Depth Estimation</title>
+    <script src="https://unpkg.com/@tensorflow-models/depth-estimation"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/onnxjs/dist/onnx.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: black; }
         canvas { display: block; }
@@ -30,44 +31,41 @@
             if (!file) return;
             const reader = new FileReader();
             reader.onload = function (e) {
-                create3DEffect(e.target.result);
+                processImage(e.target.result);
             };
             reader.readAsDataURL(file);
         });
 
-        async function create3DEffect(imageSrc) {
-            // יצירת סצנה
+        async function processImage(imageSrc) {
+            const img = new Image();
+            img.src = imageSrc;
+            img.onload = async () => {
+                const model = await depthEstimation.load();
+                const depthMap = await model.predict(img);
+                visualizeDepth(imageSrc, depthMap);
+            };
+        }
+
+        function visualizeDepth(imageSrc, depthMap) {
             const scene = new THREE.Scene();
             const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
             const renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // הוספת תאורה
             const light = new THREE.PointLight(0xffffff, 1.5, 100);
             light.position.set(0, 0, 10);
             scene.add(light);
 
-            // טעינת תמונה כמרקם
             const textureLoader = new THREE.TextureLoader();
-            textureLoader.load(imageSrc, async function (texture) {
+            textureLoader.load(imageSrc, function (texture) {
                 const geometry = new THREE.PlaneGeometry(10, 10, 100, 100);
-                
-                // טוען מודל MiDaS להערכת עומק
-                const session = new onnx.InferenceSession();
-                await session.loadModel("https://github.com/isl-org/MiDaS/releases/download/v2_1/midas_v21_small_256.onnx");
-
-                // מעבד את התמונה
-                const displacementMap = await getDepthMap(imageSrc, session);
-
-                // יצירת חומר עם מפת עומק
                 const material = new THREE.MeshStandardMaterial({
                     map: texture,
-                    displacementMap: displacementMap,
+                    displacementMap: new THREE.DataTexture(depthMap.dataSync(), depthMap.shape[1], depthMap.shape[0], THREE.LuminanceFormat, THREE.FloatType),
                     displacementScale: 2.5,
                     side: THREE.DoubleSide
                 });
-
                 const mesh = new THREE.Mesh(geometry, material);
                 scene.add(mesh);
                 camera.position.z = 10;
@@ -81,19 +79,11 @@
                 animate();
             });
 
-            // התאמת מסך
             window.addEventListener("resize", function () {
                 renderer.setSize(window.innerWidth, window.innerHeight);
                 camera.aspect = window.innerWidth / window.innerHeight;
                 camera.updateProjectionMatrix();
             });
-        }
-
-        async function getDepthMap(imageSrc, session) {
-            // כאן נכניס את הקוד לעיבוד תמונה ולהפיכת התמונה למפת עומק
-            // בשלב זה, נפשט ונחזיר מרקם ריק כפלס-הולד
-            const textureLoader = new THREE.TextureLoader();
-            return textureLoader.load(imageSrc);
         }
     </script>
 </body>
